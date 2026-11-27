@@ -7,18 +7,42 @@ permissions:
   contents: write
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - name: Build with Buildozer
-        id: buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
+      - uses: actions/setup-python@v5
         with:
-          command: buildozer android debug
-          buildozer_version: stable
+          python-version: "3.11"
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config \
+            zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev build-essential libltdl-dev
+      - name: Python dependencies
+        run: pip install --upgrade pip buildozer "cython==0.29.36" virtualenv
+      - uses: actions/cache@v4
+        with:
+          path: ~/.buildozer
+          key: buildozer-${{ hashFiles('buildozer.spec') }}
+      - name: Build APK
+        run: |
+          set -o pipefail
+          buildozer -v android debug 2>&1 | tee build.log
       - name: Publish APK to Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
+          tag_name: apk-${{ github.run_number }}
           name: stoploss APK build ${{ github.run_number }}
-          files: ${{ steps.buildozer.outputs.filename }}
+          files: bin/*.apk
+      - name: Tail of log on failure
+        if: failure()
+        run: tail -n 300 build.log > build-tail.log || echo "no log" > build-tail.log
+      - name: Publish log on failure
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: log-${{ github.run_number }}
+          name: build log ${{ github.run_number }}
+          prerelease: true
+          files: build-tail.log
